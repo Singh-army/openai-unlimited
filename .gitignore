@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+openai_unlimited_terminal_data/
+
+agent-rule.txt
+AGENT_RULES.txt
