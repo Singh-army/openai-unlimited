@@ -63,6 +63,27 @@ Or run:
 
 Use `/models` to see live model choices, then `/model <slug>` to switch.
 
+## Current Model Slugs
+
+These are the current live slugs seen by the terminal:
+
+- `auto`
+- `gpt-5-3`
+- `gpt-5-2`
+- `gpt-5-1`
+- `gpt-5`
+- `gpt-5-mini`
+
+Examples:
+
+```text
+/model auto
+/model gpt-5-3
+/model gpt-5-mini
+```
+
+The live list can change upstream. Use `/models` for the latest available slugs, tool flags, and token limits.
+
 ## Local API
 
 - base URL: `http://127.0.0.1:12434/v1`
