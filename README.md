@@ -1,177 +1,66 @@
 # openai-unlimited
 
-Local OpenAI-compatible API server. No login, no API key, no paywall.
-Works with **any** tool that accepts a custom OpenAI endpoint.
+Free GPT in your terminal + OpenAI-compatible API server — no key, no login, no paywall.
 
-```
-Base URL : http://127.0.0.1:12434/v1
-API Key  : openai-unlimited-local
-```
-
----
-
-## Requirements
-
-- Python 3.8+
-- Internet connection
-
----
-
-## Start the server
-
-**Windows:**
-```cmd
-python server.py
-```
-or double-click `start.bat`
-
-**Linux / macOS:**
-```bash
-bash start.sh
-```
-or:
-```bash
-python3 server.py
-```
-
-> deps auto-install on first run (`fastapi`, `uvicorn`, `httpx`)
-
----
-
-## Test with curl
+## Quick start
 
 ```bash
-# Health check (no auth needed)
-curl http://127.0.0.1:12434/health
-
-# List models
-curl http://127.0.0.1:12434/v1/models \
-  -H "Authorization: Bearer openai-unlimited-local"
-
-# Chat
-curl http://127.0.0.1:12434/v1/chat/completions \
-  -H "Authorization: Bearer openai-unlimited-local" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"auto","messages":[{"role":"user","content":"Hello!"}]}'
-
-# Streaming
-curl http://127.0.0.1:12434/v1/chat/completions \
-  -H "Authorization: Bearer openai-unlimited-local" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-5","messages":[{"role":"user","content":"Hello!"}],"stream":true}'
+git clone https://github.com/Singh-army/openai-unlimited
+cd openai-unlimited
+python run.py
 ```
 
----
+Dependencies install automatically on first run.
 
-## Python usage
+## Modes
 
-```bash
-pip install openai
+| Command | What it does |
+|---|---|
+| `python run.py` | Terminal coding agent — reads/writes files, runs shell |
+| `python run.py --server` | API server for Cursor / MCP / any OpenAI client |
+| `python run.py --both` | Agent + server at the same time |
+
+## Terminal agent
+
+Just talk to it like a senior dev:
+
+```
+you › fix the bug in app.py
+you › write a REST API in server.js
+you › /read config.json     ← inject file into context
+you › /ls                   ← list project files
+you › /sh npm install       ← run a shell command
+you › /model gpt-4o         ← switch model
+you › /clear                ← clear context
 ```
 
-```python
-from openai import OpenAI
+When the model writes code with a filename comment above the block, it is **auto-saved to disk**.
+Shell blocks are shown with a `[y/N]` prompt before running.
 
-client = OpenAI(
-    base_url="http://127.0.0.1:12434/v1",
-    api_key="openai-unlimited-local",
-)
+## Cursor IDE
 
-# Non-streaming
-res = client.chat.completions.create(
-    model="auto",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-print(res.choices[0].message.content)
+1. Run `python run.py --server` (keep the terminal open)
+2. Open Cursor → Settings → Models
+3. Set **Override OpenAI Base URL**: `http://localhost:12434/v1`
+4. Set **OpenAI API Key**: `openai-unlimited-local`
+5. Add custom model: `auto` (or `gpt-4o`, `gpt-5`, etc.)
+6. Click **Verify** ✓
 
-# Streaming
-stream = client.chat.completions.create(
-    model="gpt-5",
-    messages=[{"role": "user", "content": "Hello!"}],
-    stream=True,
-)
-for chunk in stream:
-    print(chunk.choices[0].delta.content or "", end="", flush=True)
-```
+## MCP / other agents
 
----
-
-## IDE Integration
-
-### Cursor
-`Settings > Models > OpenAI`:
-```
-Base URL : http://127.0.0.1:12434/v1
-API Key  : openai-unlimited-local
-```
-
-### VS Code — Continue.dev
-`~/.continue/config.json`:
 ```json
 {
-  "models": [{
-    "title": "openai-unlimited",
-    "provider": "openai",
-    "model": "auto",
-    "apiBase": "http://127.0.0.1:12434/v1",
+  "openai": {
+    "baseURL": "http://localhost:12434/v1",
     "apiKey": "openai-unlimited-local"
-  }]
-}
-```
-
-### MCP Agent
-```json
-{
-  "mcpServers": {
-    "openai-unlimited": {
-      "baseURL": "http://127.0.0.1:12434/v1",
-      "apiKey": "openai-unlimited-local",
-      "model": "auto"
-    }
   }
 }
 ```
 
----
+## Models
 
-## Node.js
-
-```js
-import OpenAI from "openai";
-const client = new OpenAI({
-  baseURL: "http://127.0.0.1:12434/v1",
-  apiKey: "openai-unlimited-local",
-});
-const res = await client.chat.completions.create({
-  model: "auto",
-  messages: [{ role: "user", content: "Hello!" }],
-});
-console.log(res.choices[0].message.content);
-```
+`auto` · `gpt-5` · `gpt-5-mini` · `gpt-4o` · `gpt-4o-mini` · `o3` · `o4-mini`
 
 ---
 
-## Endpoints
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/` | No | Server info |
-| GET | `/health` | No | Health check |
-| GET | `/v1/models` | Yes | List models |
-| POST | `/v1/chat/completions` | Yes | Chat (stream + non-stream) |
-| GET | `/docs` | No | Swagger UI |
-
----
-
-## Interactive Docs
-
-Open after starting server:
-```
-http://127.0.0.1:12434/docs
-```
-
----
-
-## Notes
-- Windows, Linux, macOS supported
-- Not affiliated with OpenAI
+> Not affiliated with OpenAI. For personal / educational use only.
