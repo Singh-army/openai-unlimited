@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "openai-unlimited"
+version = "1.0.0"
+description = "Free GPT-5 API — terminal agent, OpenAI API, MCP server. No key, no login."
+requires-python = ">=3.8"
+dependencies = [
+    "httpx",
+    "fastapi",
+    "uvicorn[standard]",
+    "mcp[cli]",
+]
+
+[project.scripts]
+unlimitedai = "run:main"
+
+[project.urls]
+Homepage = "https://github.com/Singh-army/openai-unlimited"
