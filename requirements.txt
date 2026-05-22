@@ -1,4 +1,4 @@
-# deps are auto-installed by run.py on first launch
 httpx
 fastapi
 uvicorn[standard]
+mcp[cli]
