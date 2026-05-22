@@ -1,140 +1,177 @@
 # openai-unlimited
 
-`openai-unlimited` is a Windows terminal and local API wrapper for the anonymous chat flow.
+Local OpenAI-compatible API server. No login, no API key, no paywall.
+Works with **any** tool that accepts a custom OpenAI endpoint.
 
-This project is **beta**.
-
-- terminal works
-- model selection works
-- local API works
-- current flow is free while the anonymous endpoint stays available
-- upstream changes can break compatibility at any time
-- no extra install needed beyond Windows PowerShell
-
-This project is not affiliated with OpenAI.
-
-## What You Get
-
-- 1-click start
-- 1-click stop
-- terminal chat
-- model selection from live available models
-- local OpenAI-compatible API for apps and editors
-- local session continuity and saved device id
-
-## Start
-
-Double-click:
-
-```text
-start_openai_unlimited.cmd
+```
+Base URL : http://127.0.0.1:12434/v1
+API Key  : openai-unlimited-local
 ```
 
-Or run:
+---
 
-```powershell
-.\start_openai_unlimited.cmd
+## Requirements
+
+- Python 3.8+
+- Internet connection
+
+---
+
+## Start the server
+
+**Windows:**
+```cmd
+python server.py
+```
+or double-click `start.bat`
+
+**Linux / macOS:**
+```bash
+bash start.sh
+```
+or:
+```bash
+python3 server.py
 ```
 
-## Stop
+> deps auto-install on first run (`fastapi`, `uvicorn`, `httpx`)
 
-Double-click:
+---
 
-```text
-stop_openai_unlimited.cmd
+## Test with curl
+
+```bash
+# Health check (no auth needed)
+curl http://127.0.0.1:12434/health
+
+# List models
+curl http://127.0.0.1:12434/v1/models \
+  -H "Authorization: Bearer openai-unlimited-local"
+
+# Chat
+curl http://127.0.0.1:12434/v1/chat/completions \
+  -H "Authorization: Bearer openai-unlimited-local" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello!"}]}'
+
+# Streaming
+curl http://127.0.0.1:12434/v1/chat/completions \
+  -H "Authorization: Bearer openai-unlimited-local" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5","messages":[{"role":"user","content":"Hello!"}],"stream":true}'
 ```
 
-Or run:
+---
 
-```powershell
-.\stop_openai_unlimited.cmd
+## Python usage
+
+```bash
+pip install openai
 ```
 
-## Terminal Commands
+```python
+from openai import OpenAI
 
-- `/help`
-- `/models`
-- `/categories`
-- `/model <slug>`
-- `/state`
-- `/new`
-- `/device-reset`
-- `/exit`
+client = OpenAI(
+    base_url="http://127.0.0.1:12434/v1",
+    api_key="openai-unlimited-local",
+)
 
-Use `/models` to see live model choices, then `/model <slug>` to switch.
+# Non-streaming
+res = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(res.choices[0].message.content)
 
-## Current Model Slugs
-
-These are the current live slugs seen by the terminal:
-
-- `auto`
-- `gpt-5-3`
-- `gpt-5-2`
-- `gpt-5-1`
-- `gpt-5`
-- `gpt-5-mini`
-
-Examples:
-
-```text
-/model auto
-/model gpt-5-3
-/model gpt-5-mini
+# Streaming
+stream = client.chat.completions.create(
+    model="gpt-5",
+    messages=[{"role": "user", "content": "Hello!"}],
+    stream=True,
+)
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
 ```
 
-The live list can change upstream. Use `/models` for the latest available slugs, tool flags, and token limits.
+---
 
-## Local API
+## IDE Integration
 
-- base URL: `http://127.0.0.1:12434/v1`
-- bearer key: `openai-unlimited-local`
-- endpoints:
-- `GET /health`
-- `GET /v1/models`
-- `POST /v1/chat/completions`
-
-Example:
-
-```powershell
-$headers = @{ Authorization = "Bearer openai-unlimited-local" }
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:12434/v1/chat/completions" `
-  -Headers $headers `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body '{"model":"auto","messages":[{"role":"user","content":"Reply with OK only."}],"stream":false}'
+### Cursor
+`Settings > Models > OpenAI`:
+```
+Base URL : http://127.0.0.1:12434/v1
+API Key  : openai-unlimited-local
 ```
 
-## Use In Editors And Tools
-
-You can use `openai-unlimited` in tools that support a custom OpenAI-compatible endpoint.
-
-It can be used in a similar way to Ollama in apps that let you set:
-
-- custom base URL
-- custom bearer key
-- model name from `/v1/models`
-
-It is not an Ollama server. It is a local OpenAI-compatible endpoint.
-
-## Important Limits
-
-- beta project
-- Windows-first setup
-- depends on current anonymous endpoint behavior
-- model list can change without notice
-- some upstream tools and flags may stop working without warning
-
-## Local Data
-
-Runtime state is stored locally in:
-
-```text
-openai_unlimited_terminal_data/
+### VS Code — Continue.dev
+`~/.continue/config.json`:
+```json
+{
+  "models": [{
+    "title": "openai-unlimited",
+    "provider": "openai",
+    "model": "auto",
+    "apiBase": "http://127.0.0.1:12434/v1",
+    "apiKey": "openai-unlimited-local"
+  }]
+}
 ```
 
-That folder can contain local state, cache, and session continuity data. It is ignored by Git.
+### MCP Agent
+```json
+{
+  "mcpServers": {
+    "openai-unlimited": {
+      "baseURL": "http://127.0.0.1:12434/v1",
+      "apiKey": "openai-unlimited-local",
+      "model": "auto"
+    }
+  }
+}
+```
 
-## Credits
+---
 
-Credits: [Shannsingh.com](https://shannsingh.com)
+## Node.js
+
+```js
+import OpenAI from "openai";
+const client = new OpenAI({
+  baseURL: "http://127.0.0.1:12434/v1",
+  apiKey: "openai-unlimited-local",
+});
+const res = await client.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "Hello!" }],
+});
+console.log(res.choices[0].message.content);
+```
+
+---
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/` | No | Server info |
+| GET | `/health` | No | Health check |
+| GET | `/v1/models` | Yes | List models |
+| POST | `/v1/chat/completions` | Yes | Chat (stream + non-stream) |
+| GET | `/docs` | No | Swagger UI |
+
+---
+
+## Interactive Docs
+
+Open after starting server:
+```
+http://127.0.0.1:12434/docs
+```
+
+---
+
+## Notes
+- Windows, Linux, macOS supported
+- Not affiliated with OpenAI
