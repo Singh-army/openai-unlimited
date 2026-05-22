@@ -2,13 +2,12 @@
 """
 openai-unlimited server
 Run: python server.py
-URL: http://127.0.0.1:12434/v1
+URL: http://localhost:12434/v1
 Key: openai-unlimited-local
 """
 
 import sys, subprocess, json, uuid, time
 
-# auto-install deps
 for pkg in ["fastapi", "uvicorn[standard]", "httpx"]:
     try:
         __import__(pkg.split("[")[0])
@@ -17,11 +16,11 @@ for pkg in ["fastapi", "uvicorn[standard]", "httpx"]:
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn, httpx
 
-HOST    = "127.0.0.1"
+HOST    = "0.0.0.0"
 PORT    = 12434
 API_KEY = "openai-unlimited-local"
 
@@ -43,13 +42,19 @@ HEADERS = {
 _models_cache = {"data": None, "ts": 0}
 
 app = FastAPI(title="openai-unlimited", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
-                   allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def check_auth(request: Request):
     auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer ") or auth.split(" ", 1)[1].strip() != API_KEY:
+    token = auth.split(" ", 1)[1].strip() if auth.startswith("Bearer ") else ""
+    if token != API_KEY:
         raise HTTPException(401, detail=f"Use: Authorization: Bearer {API_KEY}")
 
 
@@ -95,16 +100,60 @@ def build_upstream_body(messages: list, model: str) -> dict:
     }
 
 
+async def do_stream(messages, model, req_id, created):
+    upstream = build_upstream_body(messages, model)
+    prev = ""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
+            async with client.stream("POST", UPSTREAM, headers=HEADERS, json=upstream) as resp:
+                if resp.status_code not in (200, 201):
+                    raw = await resp.aread()
+                    yield f"data: {json.dumps({'error':{'message':f'Upstream {resp.status_code}: {raw.decode()[:200]}','type':'upstream_error'}})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        ev = json.loads(payload)
+                    except Exception:
+                        continue
+                    msg  = ev.get("message") or {}
+                    role = (msg.get("author") or {}).get("role", "")
+                    if role != "assistant":
+                        continue
+                    pts = (msg.get("content") or {}).get("parts") or []
+                    if not pts or not isinstance(pts[0], str):
+                        continue
+                    full  = pts[0]
+                    delta = full[len(prev):]
+                    prev  = full
+                    if not delta:
+                        continue
+                    yield f"data: {json.dumps({'id':req_id,'object':'chat.completion.chunk','created':created,'model':model,'choices':[{'index':0,'delta':{'role':'assistant','content':delta},'finish_reason':None}]})}\n\n"
+
+    except httpx.ConnectError:
+        yield f"data: {json.dumps({'error':{'message':'Cannot reach upstream. Check internet.','type':'connection_error'}})}\n\n"
+    except httpx.TimeoutException:
+        yield f"data: {json.dumps({'error':{'message':'Upstream timed out.','type':'timeout'}})}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'error':{'message':str(e),'type':'server_error'}})}\n\n"
+
+    yield f"data: {json.dumps({'id':req_id,'object':'chat.completion.chunk','created':created,'model':model,'choices':[{'index':0,'delta':{},'finish_reason':'stop'}]})}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 @app.get("/")
 async def root():
-    return {"server": "openai-unlimited", "base_url": f"http://{HOST}:{PORT}/v1",
-            "api_key": API_KEY, "docs": f"http://{HOST}:{PORT}/docs"}
-
+    return {"server": "openai-unlimited", "base_url": f"http://localhost:{PORT}/v1",
+            "api_key": API_KEY, "docs": f"http://localhost:{PORT}/docs"}
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
 
 @app.get("/v1/models")
 async def list_models(request: Request):
@@ -120,9 +169,8 @@ async def list_models(request: Request):
         ],
     }
 
-
 @app.post("/v1/chat/completions")
-async def chat(request: Request):
+async def chat_completions(request: Request):
     check_auth(request)
     try:
         body = await request.json()
@@ -137,60 +185,18 @@ async def chat(request: Request):
     streaming = bool(body.get("stream", False))
     req_id    = f"chatcmpl-{uuid.uuid4().hex}"
     created   = int(time.time())
-    upstream  = build_upstream_body(messages, model)
-
-    async def event_stream():
-        prev = ""
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
-                async with client.stream("POST", UPSTREAM, headers=HEADERS, json=upstream) as resp:
-                    if resp.status_code not in (200, 201):
-                        raw = await resp.aread()
-                        yield f"data: {json.dumps({'error':{'message':f'Upstream {resp.status_code}: {raw.decode()[:200]}'}})}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        payload = line[6:]
-                        if payload.strip() == "[DONE]":
-                            break
-                        try:
-                            ev = json.loads(payload)
-                        except Exception:
-                            continue
-                        msg  = ev.get("message") or {}
-                        role = (msg.get("author") or {}).get("role", "")
-                        if role != "assistant":
-                            continue
-                        pts = (msg.get("content") or {}).get("parts") or []
-                        if not pts or not isinstance(pts[0], str):
-                            continue
-                        full  = pts[0]
-                        delta = full[len(prev):]
-                        prev  = full
-                        if not delta:
-                            continue
-                        yield f"data: {json.dumps({'id':req_id,'object':'chat.completion.chunk','created':created,'model':model,'choices':[{'index':0,'delta':{'role':'assistant','content':delta},'finish_reason':None}]})}\n\n"
-
-        except httpx.ConnectError:
-            yield f"data: {json.dumps({'error':{'message':'Cannot reach upstream. Check internet.'}})}\n\n"
-        except httpx.TimeoutException:
-            yield f"data: {json.dumps({'error':{'message':'Upstream timed out.'}})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error':{'message':str(e)}})}\n\n"
-
-        yield f"data: {json.dumps({'id':req_id,'object':'chat.completion.chunk','created':created,'model':model,'choices':[{'index':0,'delta':{},'finish_reason':'stop'}]})}\n\n"
-        yield "data: [DONE]\n\n"
 
     if streaming:
-        return StreamingResponse(event_stream(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache",
-                                          "X-Accel-Buffering": "no",
-                                          "Connection": "keep-alive"})
+        return StreamingResponse(
+            do_stream(messages, model, req_id, created),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache",
+                     "X-Accel-Buffering": "no",
+                     "Connection": "keep-alive"},
+        )
 
     text = ""
-    async for chunk in event_stream():
+    async for chunk in do_stream(messages, model, req_id, created):
         if not chunk.startswith("data: "):
             continue
         p = chunk[6:].strip()
@@ -206,7 +212,8 @@ async def chat(request: Request):
     ct = len(text.split())
     return JSONResponse({
         "id": req_id, "object": "chat.completion", "created": created, "model": model,
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
+                     "finish_reason": "stop"}],
         "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct},
     })
 
@@ -216,11 +223,11 @@ if __name__ == "__main__":
 \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557
 \u2551  openai-unlimited  \u2713  running                    \u2551
 \u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563
-\u2551  Base URL \u2192  http://{HOST}:{PORT}/v1         \u2551
+\u2551  Base URL \u2192  http://localhost:{PORT}/v1         \u2551
 \u2551  API Key  \u2192  {API_KEY}  \u2551
-\u2551  Docs     \u2192  http://{HOST}:{PORT}/docs       \u2551
+\u2551  Docs     \u2192  http://localhost:{PORT}/docs       \u2551
 \u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563
-\u2551  curl http://127.0.0.1:12434/health              \u2551
+\u2551  curl http://localhost:12434/health                \u2551
 \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d
 """)
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
